@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catatan Pelanggaran Siswa</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+:root{--bg:#f3f5f2;--card:#fff;--ink:#1d2b28;--mut:#5f6f6b;--line:#d5dcd8;--pri:#0f5c4d;--pri-ink:#fff;--warn:#b4531a;--bad:#a12626}
+@media(prefers-color-scheme:dark){:root{--bg:#121a18;--card:#1b2724;--ink:#e8efec;--mut:#9fb0ab;--line:#2f3f3a;--pri:#4fb89f;--pri-ink:#08201b;--warn:#e69a5e;--bad:#f08080}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Atkinson Hyperlegible",system-ui,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 20px;background:var(--pri);color:var(--pri-ink)}
+header h1{margin:0;font-size:1.15rem}
+main{max-width:980px;margin:0 auto;padding:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:18px;margin-bottom:18px}
+h2{margin:0 0 12px;font-size:1.1rem}
+label{display:block;font-weight:700;font-size:.9rem;margin:10px 0 4px}
+input,select,textarea,button{font:inherit;color:inherit}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);padding:8px 14px;border-radius:4px}
+button.pri{background:var(--pri);color:var(--pri-ink);border-color:var(--pri);font-weight:700}
+button.del{color:var(--bad)}
+:focus-visible{outline:3px solid var(--warn);outline-offset:2px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.tabs button.on{background:var(--ink);color:var(--bg)}
+.tblwrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td.wrap{white-space:normal;min-width:160px}
+.poin{font-weight:700;color:var(--warn)}
+.msg{margin:10px 0;font-size:.92rem}.err{color:var(--bad)}.ok{color:var(--pri)}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.stat{flex:1;min-width:140px;border-left:4px solid var(--warn);padding:4px 12px}
+.stat b{display:block;font-size:1.6rem}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.bar>*{width:auto;flex:1;min-width:140px}
+.hide{display:none}
+dialog{border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);width:92%;max-width:540px;padding:18px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.badge{border:2px solid currentColor;padding:1px 8px;border-radius:3px;font-weight:700}
+.l1{color:var(--warn)}.l2{color:var(--warn);background:rgba(180,83,26,.15)}.l3{color:var(--bad);background:rgba(161,38,38,.15)}
+.login{max-width:400px;margin:40px auto}
+@media(max-width:600px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>Catatan Pelanggaran Siswa</h1><div id="who"></div></header>
+<main id="app"></main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// ====== ISI DUA BARIS INI (dari Supabase > Project Settings > API) ======
+const SUPABASE_URL = "https://XXXXXXXX.supabase.co";
+const SUPABASE_ANON_KEY = "ISI_ANON_PUBLIC_KEY";
+// ========================================================================
+
+const JENIS = [
+  ["Terlambat masuk sekolah",5],["Tidak memakai atribut lengkap",5],["Rambut tidak sesuai aturan",10],
+  ["Membolos / alpa",15],["Membawa HP saat pelajaran",10],["Merokok / membawa rokok",30],
+  ["Berkelahi",40],["Merusak fasilitas sekolah",25],["Lainnya",0]
+];
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const ROLE_LABEL = {admin:"Admin", bk:"BK", guru:"Guru", osis:"OSIS", pending:"Menunggu persetujuan"};
+let me = null, rows = [];
+
+async function boot() {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) return showLogin();
+  const { data, error } = await db.from("profiles").select("*").eq("id", session.user.id).single();
+  if (error || !data) { await db.auth.signOut(); return showLogin("Profil tidak ditemukan. Coba daftar ulang."); }
+  me = data;
+  $("#who").innerHTML = `${esc(me.nama)} (${ROLE_LABEL[me.role] || me.role}) <button id="out">Keluar</button>`;
+  $("#out").onclick = async () => { await db.auth.signOut(); location.reload(); };
+  if (me.role === "pending") return $("#app").innerHTML = `<div class="card"><h2>Akun menunggu persetujuan</h2><p>Minta admin sekolah untuk mengaktifkan akun Anda, lalu muat ulang halaman ini.</p></div>`;
+  showApp();
+}
+
+function showLogin(note = "") {
+  $("#who").innerHTML = "";
+  $("#app").innerHTML = `<div class="card login"><h2 id="lt">Masuk</h2>
+    <div id="nmw" class="hide"><label for="nama">Nama lengkap</label><input id="nama"></div>
+    <label for="em">Email</label><input id="em" type="email" autocomplete="username">
+    <label for="pw">Kata sandi (min. 6 karakter)</label><input id="pw" type="password" autocomplete="current-password">
+    <p class="msg err" id="lm">${esc(note)}</p>
+    <button class="pri" id="go">Masuk</button> <button id="sw">Belum punya akun? Daftar</button></div>`;
+  let reg = false;
+  $("#sw").onclick = () => { reg = !reg; $("#nmw").classList.toggle("hide", !reg); $("#lt").textContent = reg ? "Daftar akun" : "Masuk"; $("#go").textContent = reg ? "Daftar" : "Masuk"; $("#sw").textContent = reg ? "Sudah punya akun? Masuk" : "Belum punya akun? Daftar"; };
+  $("#go").onclick = async () => {
+    const email = $("#em").value.trim(), password = $("#pw").value;
+    const r = reg ? await db.auth.signUp({ email, password, options: { data: { nama: $("#nama").value.trim() } } })
+                  : await db.auth.signInWithPassword({ email, password });
+    if (r.error) return $("#lm").textContent = r.error.message;
+    if (reg && !r.data.session) { $("#lm").className = "msg ok"; return $("#lm").textContent = "Pendaftaran berhasil. Cek email untuk konfirmasi (jika diminta), lalu masuk."; }
+    boot();
+  };
+}
+
+function showApp() {
+  const canInput = ["guru","osis","admin"].includes(me.role);
+  const canRecap = ["admin","bk"].includes(me.role);
+  const tabs = [];
+  if (canInput) tabs.push(["input","Input pelanggaran"]);
+  tabs.push([canRecap ? "recap" : "mine", canRecap ? "Rekap data" : "Riwayat input saya"]);
+  if (canRecap) tabs.push(["check","Pengecekan mingguan"]);
+  if (me.role === "admin") tabs.push(["users","Kelola akun"]);
+  $("#app").innerHTML = `<div class="tabs">${tabs.map(t => `<button data-t="${t[0]}">${t[1]}</button>`).join("")}</div><div id="view"></div>`;
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => go(b.dataset.t));
+  go(tabs[0][0]);
+}
+
+function go(t) {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+  ({ input: viewInput, recap: viewRecap, mine: viewMine, check: viewCheck, users: viewUsers })[t]();
+}
+
+function viewInput() {
+  $("#view").innerHTML = `<div class="card"><h2>Input pelanggaran</h2>
+    <div class="row"><div><label for="nis">NIS</label><input id="nis" inputmode="numeric"></div>
+    <div><label for="ns">Nama siswa</label><input id="ns"></div></div>
+    <div class="row"><div><label for="kl">Kelas</label><input id="kl" placeholder="mis. 8A"></div>
+    <div><label for="tg">Tanggal</label><input id="tg" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div>
+    <div class="row"><div><label for="jn">Jenis pelanggaran</label><select id="jn">${JENIS.map(j => `<option value="${j[1]}">${j[0]}</option>`).join("")}</select></div>
+    <div><label for="pn">Poin</label><input id="pn" type="number" min="0" value="${JENIS[0][1]}"></div></div>
+    <label for="ct">Catatan</label><textarea id="ct" rows="3"></textarea>
+    <p class="msg" id="im"></p><button class="pri" id="sv">Simpan pelanggaran</button></div>`;
+  $("#jn").onchange = e => $("#pn").value = e.target.value;
+  $("#sv").onclick = async () => {
+    const jenis = $("#jn").selectedOptions[0].text, nama = $("#ns").value.trim(), kelas = $("#kl").value.trim().toUpperCase();
+    if (!nama || !kelas) { $("#im").className = "msg err"; return $("#im").textContent = "Nama siswa dan kelas wajib diisi."; }
+    const { error } = await db.from("violations").insert({ nis: $("#nis").value.trim(), nama_siswa: nama, kelas, jenis, poin: +$("#pn").value || 0, catatan: $("#ct").value.trim(), tanggal: $("#tg").value, pelapor_nama: me.nama });
+    $("#im").className = "msg " + (error ? "err" : "ok");
+    $("#im").textContent = error ? "Gagal menyimpan: " + error.message : "Pelanggaran tersimpan.";
+    if (!error) { $("#ns").value = $("#nis").value = $("#ct").value = ""; }
+  };
+}
+
+async function load() {
+  const { data, error } = await db.from("violations").select("*").order("tanggal", { ascending: false }).order("id", { ascending: false });
+  if (error) { $("#view").innerHTML = `<p class="msg err">${esc(error.message)}</p>`; return false; }
+  rows = data; return true;
+}
+
+async function viewMine() {
+  if (!(await load())) return;
+  $("#view").innerHTML = `<div class="card"><h2>Riwayat input saya</h2>${table(rows, false)}</div>`;
+}
+
+async function viewRecap() {
+  if (!(await load())) return;
+  const kelas = [...new Set(rows.map(r => r.kelas))].sort();
+  $("#view").innerHTML = `<div class="card"><h2>Rekap pelanggaran</h2>
+    <div class="bar"><select id="fk"><option value="">Semua kelas</option>${kelas.map(k => `<option>${esc(k)}</option>`).join("")}</select>
+    <input id="fq" placeholder="Cari nama / NIS"><input id="fa" type="date" title="Dari tanggal"><input id="fb" type="date" title="Sampai tanggal">
+    <button id="csv">Unduh CSV</button></div><div id="rc"></div></div>`;
+  ["fk","fq","fa","fb"].forEach(i => $("#" + i).oninput = draw);
+  $("#csv").onclick = () => csv(filtered());
+  draw();
+}
+
+function filtered() {
+  const k = $("#fk").value, q = $("#fq").value.toLowerCase(), a = $("#fa").value, b = $("#fb").value;
+  return rows.filter(r => (!k || r.kelas === k) && (!q || (r.nama_siswa + " " + (r.nis || "")).toLowerCase().includes(q)) && (!a || r.tanggal >= a) && (!b || r.tanggal <= b));
+}
+
+function draw() {
+  const f = filtered(), per = {};
+  f.forEach(r => { const key = r.nis || r.nama_siswa + r.kelas; (per[key] ??= { nama: r.nama_siswa, kelas: r.kelas, n: 0, p: 0 }); per[key].n++; per[key].p += r.poin; });
+  const top = Object.values(per).sort((x, y) => y.p - x.p);
+  $("#rc").innerHTML = `<div class="stats"><div class="stat"><b>${f.length}</b>kasus tercatat</div><div class="stat"><b>${top.length}</b>siswa melanggar</div><div class="stat"><b>${f.reduce((s, r) => s + r.poin, 0)}</b>total poin</div></div>
+    <h2>Total poin per siswa</h2><div class="tblwrap"><table><tr><th>Nama</th><th>Kelas</th><th>Jumlah</th><th>Total poin</th></tr>
+    ${top.map(s => `<tr><td>${esc(s.nama)}</td><td>${esc(s.kelas)}</td><td>${s.n}</td><td class="poin">${s.p}</td></tr>`).join("") || `<tr><td colspan="4">Belum ada data untuk filter ini.</td></tr>`}</table></div>
+    <h2 style="margin-top:20px">Semua catatan</h2>${table(f, me.role === "admin")}`;
+  document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openEdit(b.dataset.edit));
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm("Hapus catatan ini?")) return;
+    const { error } = await db.from("violations").delete().eq("id", b.dataset.del);
+    if (error) return alert(error.message);
+    rows = rows.filter(r => r.id != b.dataset.del); draw();
+  });
+}
+
+function table(list, canDel) {
+  if (!list.length) return `<p>Belum ada catatan.</p>`;
+  return `<div class="tblwrap"><table><tr><th>Tanggal</th><th>Siswa</th><th>Kelas</th><th>Pelanggaran</th><th>Poin</th><th>Catatan</th><th>Pelapor</th>${canDel ? "<th></th>" : ""}</tr>
+  ${list.map(r => `<tr><td>${esc(r.tanggal)}</td><td>${esc(r.nama_siswa)}${r.nis ? " (" + esc(r.nis) + ")" : ""}</td><td>${esc(r.kelas)}</td><td>${esc(r.jenis)}</td><td class="poin">${r.poin}</td><td class="wrap">${esc(r.catatan)}</td><td>${esc(r.pelapor_nama)}</td>${canDel ? `<td><button data-edit="${r.id}">Ubah</button> <button class="del" data-del="${r.id}">Hapus</button></td>` : ""}</tr>`).join("")}</table></div>`;
+}
+
+function openEdit(id) {
+  const r = rows.find(x => x.id == id); if (!r) return;
+  let d = $("#ed"); if (!d) { d = document.createElement("dialog"); d.id = "ed"; document.body.appendChild(d); }
+  const names = JENIS.map(j => j[0]); if (!names.includes(r.jenis)) names.push(r.jenis);
+  d.innerHTML = `<h2>Ubah catatan</h2>
+    <div class="row"><div><label for="e1">NIS</label><input id="e1" value="${esc(r.nis)}"></div><div><label for="e2">Nama siswa</label><input id="e2" value="${esc(r.nama_siswa)}"></div></div>
+    <div class="row"><div><label for="e3">Kelas</label><input id="e3" value="${esc(r.kelas)}"></div><div><label for="e4">Tanggal</label><input id="e4" type="date" value="${esc(r.tanggal)}"></div></div>
+    <div class="row"><div><label for="e5">Jenis</label><select id="e5">${names.map(n => `<option ${n === r.jenis ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></div><div><label for="e6">Poin</label><input id="e6" type="number" min="0" value="${r.poin}"></div></div>
+    <label for="e7">Catatan</label><textarea id="e7" rows="3">${esc(r.catatan)}</textarea>
+    <p class="msg err" id="em2"></p><button class="pri" id="e8">Simpan perubahan</button> <button id="e9">Batal</button>`;
+  d.showModal();
+  $("#e9").onclick = () => d.close();
+  $("#e8").onclick = async () => {
+    const patch = { nis: $("#e1").value.trim(), nama_siswa: $("#e2").value.trim(), kelas: $("#e3").value.trim().toUpperCase(), tanggal: $("#e4").value, jenis: $("#e5").value, poin: +$("#e6").value || 0, catatan: $("#e7").value.trim() };
+    if (!patch.nama_siswa || !patch.kelas) return $("#em2").textContent = "Nama siswa dan kelas wajib diisi.";
+    const { data, error } = await db.from("violations").update(patch).eq("id", id).select();
+    if (error || !data.length) return $("#em2").textContent = error ? error.message : "Perubahan ditolak: hanya admin yang boleh mengubah data.";
+    Object.assign(r, patch); d.close(); draw();
+  };
+}
+
+// ===== Pengecekan mingguan (minggu = Senin-Minggu) =====
+const BATAS = 2; // lebih dari 2 pelanggaran dalam seminggu = Peringatan 1
+const iso = d => d.toISOString().slice(0, 10);
+function mondayOf(s) { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d; }
+function statusSiswa(list) {
+  const cnt = {}; list.forEach(r => { const k = iso(mondayOf(r.tanggal)); cnt[k] = (cnt[k] || 0) + 1; });
+  const keys = Object.keys(cnt).sort();
+  const nowMon = mondayOf(iso(new Date()));
+  const end = new Date(Math.max(nowMon, new Date(keys[keys.length - 1] + "T00:00:00Z")));
+  let lv = 0; const hist = [];
+  for (const w = new Date(keys[0] + "T00:00:00Z"); w <= end; w.setUTCDate(w.getUTCDate() + 7)) {
+    const c = cnt[iso(w)] || 0, cur = iso(w) === iso(nowMon); let ev = "";
+    if (lv === 0) { if (c > BATAS) { lv = 1; ev = "Peringatan 1"; } }
+    else if (lv === 3) { if (c) ev = "SP berlanjut"; }
+    else if (c === 0) { if (cur) ev = "menunggu, minggu berjalan"; else { lv = 0; ev = "dianggap berubah"; } }
+    else if (lv === 1) { lv = 2; ev = "Peringatan 2"; }
+    else { lv = 3; ev = "SP"; }
+    hist.push({ w: iso(w), c, ev });
+  }
+  return { lv, hist };
+}
+
+async function viewCheck() {
+  if (!(await load())) return;
+  const grp = {};
+  rows.forEach(r => { const k = r.nis || r.nama_siswa + "|" + r.kelas; (grp[k] ??= { nama: r.nama_siswa, kelas: r.kelas, list: [] }).list.push(r); });
+  const res = Object.values(grp).map(s => ({ ...s, ...statusSiswa(s.list) }));
+  const nama = ["Aman", "Peringatan 1", "Peringatan 2", "SP"];
+  const aksi = ["", "Panggil siswa dan beri Peringatan 1", "Panggil siswa dan beri Peringatan 2", "Terbitkan SP"];
+  const need = res.filter(s => s.lv > 0).sort((a, b) => b.lv - a.lv);
+  const ok = res.filter(s => s.lv === 0 && s.hist.some(h => h.ev === "dianggap berubah")).length;
+  $("#view").innerHTML = `<div class="card"><h2>Pengecekan mingguan</h2>
+    <p class="msg">Minggu dihitung Senin sampai Minggu. Lebih dari ${BATAS} pelanggaran dalam seminggu: Peringatan 1. Minggu berikutnya tanpa pelanggaran: dianggap berubah dan tidak dipanggil. Jika melanggar lagi: Peringatan 2. Jika minggu berikutnya masih melanggar: SP. Minggu yang masih berjalan belum dianggap bersih.</p>
+    <div class="stats"><div class="stat"><b>${need.filter(s => s.lv === 1).length}</b>Peringatan 1</div><div class="stat"><b>${need.filter(s => s.lv === 2).length}</b>Peringatan 2</div><div class="stat"><b>${need.filter(s => s.lv === 3).length}</b>SP</div><div class="stat"><b>${ok}</b>sudah dianggap berubah</div></div>
+    <div class="tblwrap"><table><tr><th>Siswa</th><th>Kelas</th><th>Status</th><th>Tindakan</th><th>Riwayat (awal minggu: jumlah)</th></tr>
+    ${need.map(s => `<tr><td>${esc(s.nama)}</td><td>${esc(s.kelas)}</td><td><span class="badge l${s.lv}">${nama[s.lv]}</span></td><td>${aksi[s.lv]}</td><td>${s.hist.slice(-4).map(h => `${h.w.slice(5)}: ${h.c}${h.ev ? " (" + h.ev + ")" : ""}`).join(" → ")}</td></tr>`).join("") || `<tr><td colspan="5">Tidak ada siswa yang perlu dipanggil saat ini.</td></tr>`}</table></div></div>`;
+}
+
+function csv(list) {
+  const h = ["tanggal","nis","nama_siswa","kelas","jenis","poin","catatan","pelapor_nama"];
+  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  const txt = [h.join(","), ...list.map(r => h.map(k => q(r[k])).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + txt], { type: "text/csv" }));
+  a.download = "rekap-pelanggaran.csv"; a.click();
+}
+
+async function viewUsers() {
+  const { data, error } = await db.from("profiles").select("*").order("nama");
+  if (error) return $("#view").innerHTML = `<p class="msg err">${esc(error.message)}</p>`;
+  $("#view").innerHTML = `<div class="card"><h2>Kelola akun</h2><p>Atur peran tiap akun. Akun baru berstatus "Menunggu persetujuan".</p><div class="tblwrap"><table><tr><th>Nama</th><th>Email</th><th>Peran</th></tr>
+    ${data.map(u => `<tr><td>${esc(u.nama)}</td><td>${esc(u.email)}</td><td><select data-u="${u.id}" ${u.id === me.id ? "disabled" : ""}>${Object.entries(ROLE_LABEL).map(([k, v]) => `<option value="${k}" ${u.role === k ? "selected" : ""}>${v}</option>`).join("")}</select></td></tr>`).join("")}</table></div><p class="msg" id="um"></p></div>`;
+  document.querySelectorAll("[data-u]").forEach(s => s.onchange = async () => {
+    const { error } = await db.from("profiles").update({ role: s.value }).eq("id", s.dataset.u);
+    $("#um").className = "msg " + (error ? "err" : "ok"); $("#um").textContent = error ? error.message : "Peran diperbarui.";
+  });
+}
+
+boot();
+</script>
+</body>
+</html>
